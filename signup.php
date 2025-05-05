@@ -1,5 +1,6 @@
 <?php
 require 'config.php';
+session_start();
 $errors = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -12,6 +13,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Validation
         if (empty($username)) {
             $errors['username'] = "Username is required";
+        } elseif (strlen($username) < 3) {
+            $errors['username'] = "Username must be at least 3 characters";
         }
         
         if (empty($email)) {
@@ -30,36 +33,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errors['confirmPassword'] = "Passwords do not match";
         }
 
-// Inside the registration logic:
-if (empty($errors)) {
-  // Check if user exists by email
-  $stmt = $conn->prepare("SELECT user_id FROM users WHERE email = ?");
-  $stmt->execute([$email]);
-  
-  if ($stmt->rowCount() > 0) {
-      $errors['email'] = "Email already registered";
-  } else {
-      // Hash password
-      $passwordHash = password_hash($password, PASSWORD_DEFAULT);
+        if (empty($errors)) {
+            $conn->beginTransaction();
+            
+            // Check if user exists by email
+            $stmt = $conn->prepare("SELECT user_id FROM users WHERE email = ?");
+            $stmt->execute([$email]);
+            
+            if ($stmt->rowCount() > 0) {
+                $errors['email'] = "Email already registered";
+            } else {
+                // Hash password
+                $passwordHash = password_hash($password, PASSWORD_DEFAULT);
 
-      // Insert user with CORRECT COLUMN NAME
-      $stmt = $conn->prepare("INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)");
-      $stmt->execute([$username, $email, $passwordHash]);
-      
-      session_start();
-      $_SESSION['user_id'] = $conn->lastInsertId();
-      
-      // Redirect to role selection instead of role_selection.html
-      header("Location: role_selection.php");
-      exit();
-  }
-}
+                // Insert user with default 'enthusiast' role
+                $stmt = $conn->prepare("INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, 'enthusiast')");
+                $stmt->execute([$username, $email, $passwordHash]);
+                $user_id = $conn->lastInsertId();
+                
+                $conn->commit();
+                
+                $_SESSION['user_id'] = $user_id;
+                $_SESSION['username'] = $username;
+                
+                // Redirect to role selection
+                header("Location: role_selection.php");
+                exit();
+            }
+        }
     } catch (PDOException $e) {
+        if (isset($conn) && $conn->inTransaction()) {
+            $conn->rollBack();
+        }
         $errors[] = "Database error: " . $e->getMessage();
+    } catch (Exception $e) {
+        if (isset($conn) && $conn->inTransaction()) {
+            $conn->rollBack();
+        }
+        $errors[] = "Error: " . $e->getMessage();
     }
 }
-
-
 ?>
 
 <!DOCTYPE html>
@@ -129,4 +142,4 @@ if (empty($errors)) {
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="signup.js"></script>
 </body>
-</html
+</html>
